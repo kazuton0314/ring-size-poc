@@ -11,6 +11,9 @@ env/
 *.env
 *.venv
 
+# --- 出力ファイル ---
+output/
+
 # --- Python Packaging ---
 build/
 develop-eggs/
