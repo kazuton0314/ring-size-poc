@@ -8,7 +8,7 @@ import mediapipe as mp
 import numpy as np
 
 # ========= 設定（必要に応じて編集） =========
-IMG_PATH = 'images/sample8.jpg'
+IMG_PATH = 'images/sample1.jpg'
 TEN_YEN_DIAMETER_CM = 2.3
 MAX_WIDTH = 600
 

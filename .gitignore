@@ -13,6 +13,7 @@ env/
 
 # --- 出力ファイル ---
 output/
+output_batch/
 
 # --- Python Packaging ---
 build/
