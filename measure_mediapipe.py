@@ -88,16 +88,6 @@ def draw_landmarks(img_bgr: np.ndarray, hand_lms) -> np.ndarray:
     return vis
 
 
-def build_hand_mask(img_shape: Tuple[int, int], hand_lms) -> np.ndarray:
-    """21点の凸包で手マスク（白=手域）を作る"""
-    h, w = img_shape
-    pts = np.array([[lm.x * w, lm.y * h] for lm in hand_lms.landmark], dtype=np.int32)
-    hull = cv2.convexHull(pts)
-    mask = np.zeros((h, w), np.uint8)
-    cv2.fillConvexPoly(mask, hull, 255)
-    return mask
-
-
 # ========= 軸計算（PIPの横幅方向） =========
 def compute_pip_axes(hand_lms, w: int, h: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -121,49 +111,37 @@ def compute_pip_axes(hand_lms, w: int, h: int) -> Tuple[np.ndarray, np.ndarray, 
     perp = np.array([-v_unit[1], v_unit[0]], dtype=np.float32)
     return p_pip, v_unit, perp
 
-
 # ========= ROI/ストリップ/エッジ =========
-def crop_roi(gray: np.ndarray, mask: np.ndarray, center: np.ndarray, radius: int
-             ) -> Tuple[np.ndarray, np.ndarray, Tuple[int, int, int, int]]:
+def crop_roi(gray: np.ndarray, center: np.ndarray, radius: int):
     h, w = gray.shape[:2]
     x1 = int(max(center[0] - radius, 0))
     x2 = int(min(center[0] + radius, w - 1))
     y1 = int(max(center[1] - radius, 0))
     y2 = int(min(center[1] + radius, h - 1))
     roi_gray = gray[y1:y2, x1:x2]
-    roi_mask = mask[y1:y2, x1:x2]
-    return roi_gray, roi_mask, (x1, y1, x2, y2)
+    return roi_gray, (x1, y1, x2, y2)
 
-
-def make_finger_strip_mask(roi_shape: Tuple[int, int], roi_xywh: Tuple[int, int, int, int],
-                           pip_xy: np.ndarray, v_unit: np.ndarray, hand_roi_mask: np.ndarray,
-                           band_px: int) -> Tuple[np.ndarray, np.ndarray]:
-    """PIPを中心に、長手方向±band_pxの帯マスクを作り、手マスクとAND"""
+# ===== 指ストリップ =====
+def make_strip_only_mask(roi_shape, roi_xyxy, pip_xy, v_unit, band_px):
     H, W = roi_shape
-    x1, y1, x2, y2 = roi_xywh
+    x1, y1, x2, y2 = roi_xyxy
     yy, xx = np.mgrid[0:H, 0:W]
     XX = xx + x1
     YY = yy + y1
     P = np.stack([XX, YY], axis=-1).astype(np.float32)
-    proj_long = ((P - pip_xy) @ v_unit).astype(np.float32)
+    proj_long = ((P - pip_xy) @ v_unit).astype(np.float32)  # 長手方向距離
     strip = (np.abs(proj_long) <= band_px).astype(np.uint8) * 255
-    finger_mask = cv2.bitwise_and(hand_roi_mask, strip)
-    return strip, finger_mask
+    return strip
 
-
-def edges_in_strip(roi_gray: np.ndarray, finger_mask: np.ndarray,
-                   canny_lo: int, canny_hi: int) -> np.ndarray:
-    """帯マスク内のエッジだけを抽出"""
-    blur = cv2.GaussianBlur(roi_gray, (3, 3), 0)
-    edges = cv2.Canny(blur, canny_lo, canny_hi)
-    edges = cv2.bitwise_and(edges, finger_mask)
+# ===== エッジ抽出 =====
+def edges_in_strip(roi_gray: np.ndarray, strip_mask: np.ndarray):
+    blur = cv2.GaussianBlur(roi_gray, (3,3), 0)
+    edges = cv2.Canny(blur, CANNY_LO, CANNY_HI)
+    edges = cv2.bitwise_and(edges, strip_mask)
     return edges
 
-
 # ========= 端探索・可視化 =========
-def first_edge(center_xy: np.ndarray, dir_unit: np.ndarray, x1: int, y1: int,
-               edge_img: np.ndarray, max_len: int) -> Optional[np.ndarray]:
-    """centerからdir方向へ進み、最初に当たるエッジ画素を返す（なければNone）"""
+def first_edge(center_xy, dir_unit, x1, y1, edge_img, max_len):
     H, W = edge_img.shape
     for t in range(1, max_len + 1):
         p = center_xy + dir_unit * t
@@ -174,11 +152,9 @@ def first_edge(center_xy: np.ndarray, dir_unit: np.ndarray, x1: int, y1: int,
             return np.array([x + x1, y + y1], dtype=np.float32)
     return None
 
-
-def visualize_rays(edge_img: np.ndarray, center_xy: np.ndarray, v_unit: np.ndarray,
-                   perp: np.ndarray, x1: int, y1: int, max_len: int,
-                   offsets: Tuple[int, ...] = (-6, -3, 0, 3, 6)) -> np.ndarray:
-    """確認用に探索方向の矢印を描く"""
+# ===== 可視化（探索矢印）=====
+def visualize_rays(edge_img, center_xy, v_unit, perp, x1, y1, max_len,
+                   offsets=(-6, -3, 0, 3, 6)):
     vis = cv2.cvtColor(edge_img, cv2.COLOR_GRAY2BGR)
     for off in offsets:
         s = center_xy + v_unit * off
@@ -188,19 +164,16 @@ def visualize_rays(edge_img: np.ndarray, center_xy: np.ndarray, v_unit: np.ndarr
         cv2.arrowedLine(vis, p0, p1, (200, 200, 200), 1, tipLength=0.08)
     return vis
 
-
 # ========= メイン測定フロー =========
-def measure_pip_width(img_path: str) -> None:
-    # 1) 画像読み込み
+def main(img_path: str):
+    # 入力
     img = load_and_resize(img_path, MAX_WIDTH)
     save(os.path.join(DEBUG_DIR, '00_input.jpg'), img)
 
-    # 2) スケール
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    px_per_cm, img_circle = detect_coin_scale(gray, TEN_YEN_DIAMETER_CM)
-    save(os.path.join(DEBUG_DIR, '10_circle.jpg'), img_circle)
+    px_per_cm, vis_circle = detect_coin_scale(gray, TEN_YEN_DIAMETER_CM)
+    save(os.path.join(DEBUG_DIR, '10_circle.jpg'), vis_circle)
 
-    # 3) 手ランドマーク & 手マスク
     hand_lms = detect_hand_landmarks(img)
     if hand_lms is None:
         print('[ERROR] 手が検出できません'); return
@@ -208,28 +181,21 @@ def measure_pip_width(img_path: str) -> None:
     save(os.path.join(DEBUG_DIR, '15_landmarks.jpg'), vis_lm)
 
     h, w = img.shape[:2]
-    hand_mask = build_hand_mask((h, w), hand_lms)
-    save(os.path.join(DEBUG_DIR, '20_hand_mask.png'), hand_mask)
-
-    # 4) PIPの位置と軸
     p_pip, v_unit, perp = compute_pip_axes(hand_lms, w, h)
 
-    # 5) ROI
-    roi_gray, roi_mask, (x1, y1, x2, y2) = crop_roi(gray, hand_mask, p_pip, ROI_SIZE)
+    # ROI
+    roi_gray, (x1, y1, x2, y2) = crop_roi(gray, p_pip, ROI_SIZE)
     save(os.path.join(DEBUG_DIR, '30_roi_gray.png'), roi_gray)
 
-    # 6) 指ストリップ & マスク
-    strip, finger_mask = make_finger_strip_mask(
-        roi_gray.shape, (x1, y1, x2, y2), p_pip, v_unit, roi_mask, BAND_PX
-    )
-    save(os.path.join(DEBUG_DIR, '31_finger_strip.png'), strip)
-    save(os.path.join(DEBUG_DIR, '32_finger_mask.png'), finger_mask)
+    # 帯
+    strip = make_strip_only_mask(roi_gray.shape, (x1,y1,x2,y2), p_pip, v_unit, BAND_PX)
+    save(os.path.join(DEBUG_DIR, '31_strip_only.png'), strip)
 
-    # 7) エッジ
-    edges = edges_in_strip(roi_gray, finger_mask, CANNY_LO, CANNY_HI)
+    # エッジ
+    edges = edges_in_strip(roi_gray, strip)
     save(os.path.join(DEBUG_DIR, '40_edges_in_strip.png'), edges)
 
-    # 8) 端探索（中心線のみ）
+    # 端探索
     center = p_pip.copy()
     max_len = int(ROI_SIZE * 0.9)
     right_edge = first_edge(center,  perp, x1, y1, edges, max_len)
@@ -239,7 +205,7 @@ def measure_pip_width(img_path: str) -> None:
     vis_rays = visualize_rays(edges, center, v_unit, perp, x1, y1, max_len)
     save(os.path.join(DEBUG_DIR, '50_rays.png'), vis_rays)
 
-    # 9) 出力
+    # 出力
     out = img.copy()
     cv2.circle(out, safe_pt(center), 3, (255, 0, 0), -1)
     label = "Edge not found"
@@ -255,11 +221,9 @@ def measure_pip_width(img_path: str) -> None:
     cv2.putText(out, label, (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
     save(os.path.join(DEBUG_DIR, '60_result.jpg'), out)
 
-    # 表示
     cv2.imshow('Result', out)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-
-if __name__ == "__main__":
-    measure_pip_width(IMG_PATH)
+if __name__ == '__main__':
+    main(IMG_PATH)
