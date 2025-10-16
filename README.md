@@ -123,7 +123,7 @@ pip install -r requirements.txt
 - 画像データは匿名化・マスク処理を推奨します。
 
 ## License
-© 2025 kazuton. All rights reserved.
+© 2025 kazuton0314. All rights reserved.
 
 This repository is provided for demonstration and evaluation purposes only.
 Commercial use, redistribution, or modification without permission is prohibited.
