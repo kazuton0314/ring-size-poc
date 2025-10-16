@@ -32,6 +32,9 @@ python src/measure_mediapipe.py
 - `50_rays.png` : スキャン方向確認
 - `60_result.jpg` : 幅検出の最終可視化
 
+サンプル結果：PIP横幅測定例（sample1.jpg）
+<p align="center"> <img src="output/60_result.jpg" width="450"><br> <em>図1. 薬指PIPの横幅測定結果（赤線が検出線）</em> </p>
+
 ## 複数画像の一括評価（sample1〜7）
 
 ```

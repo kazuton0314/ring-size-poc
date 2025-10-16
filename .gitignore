@@ -12,7 +12,8 @@ env/
 *.venv
 
 # --- 出力ファイル ---
-output/
+output/*
+!output/60_result.jpg
 output_batch/
 
 # --- Python Packaging ---
