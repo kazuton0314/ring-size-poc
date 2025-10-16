@@ -1,0 +1,14 @@
+Copyright (c) 2025 kazuton0314
+All rights reserved.
+
+This software is provided for demonstration and evaluation purposes only.
+Unauthorized copying, modification, redistribution, or commercial use
+of this code, in whole or in part, is strictly prohibited without
+written permission from the author.
+
+This project uses the following third-party libraries:
+- OpenCV (BSD-3-Clause License)
+- MediaPipe (Apache License 2.0)
+- NumPy (BSD License)
+
+Each third-party library retains its own license and terms of use.
